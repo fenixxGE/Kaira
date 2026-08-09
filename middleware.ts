@@ -3,34 +3,44 @@ import { NextResponse, type NextRequest } from "next/server";
 
 /**
  * Middleware: refresca sesión y protege /app/*.
- * Rutas públicas: /, /login, /auth/*, /api/waitlist
+ * Aplica solo a /app/* y /login (no a landing pública).
  */
 export async function middleware(req: NextRequest) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  // Si faltan env vars, no bloqueamos — solo dejamos pasar.
+  // (evita 500 durante configuración inicial)
+  if (!url || !key) return NextResponse.next();
+
   let res = NextResponse.next({ request: { headers: req.headers } });
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name) {
-          return req.cookies.get(name)?.value;
-        },
-        set(name, value, options) {
-          req.cookies.set({ name, value, ...options });
-          res = NextResponse.next({ request: { headers: req.headers } });
-          res.cookies.set({ name, value, ...options });
-        },
-        remove(name, options) {
-          req.cookies.set({ name, value: "", ...options });
-          res = NextResponse.next({ request: { headers: req.headers } });
-          res.cookies.set({ name, value: "", ...options });
-        },
+  const supabase = createServerClient(url, key, {
+    cookies: {
+      get(name) {
+        return req.cookies.get(name)?.value;
+      },
+      set(name, value, options) {
+        req.cookies.set({ name, value, ...options });
+        res = NextResponse.next({ request: { headers: req.headers } });
+        res.cookies.set({ name, value, ...options });
+      },
+      remove(name, options) {
+        req.cookies.set({ name, value: "", ...options });
+        res = NextResponse.next({ request: { headers: req.headers } });
+        res.cookies.set({ name, value: "", ...options });
       },
     },
-  );
+  });
 
-  const { data: { user } } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    // No romper si Supabase falla
+    return NextResponse.next();
+  }
 
   const path = req.nextUrl.pathname;
   const isProtected = path.startsWith("/app");
@@ -49,6 +59,7 @@ export async function middleware(req: NextRequest) {
   return res;
 }
 
+// Solo interceptar /app/* y /login — deja landing pública intacta
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: ["/app/:path*", "/login"],
 };
